@@ -11,7 +11,7 @@ from pytorch_lightning.utilities.distributed import rank_zero_only
 class ImageLogger(Callback):
     def __init__(self, batch_frequency=2000, max_images=4, clamp=True, increase_log_steps=True,
                  rescale=True, disabled=False, log_on_batch_idx=False, log_first_step=False,
-                 log_images_kwargs=None):
+                 log_images_kwargs=None, name='default'):
         super().__init__()
         self.rescale = rescale
         self.batch_freq = batch_frequency
@@ -23,54 +23,85 @@ class ImageLogger(Callback):
         self.log_on_batch_idx = log_on_batch_idx
         self.log_images_kwargs = log_images_kwargs if log_images_kwargs else {}
         self.log_first_step = log_first_step
+        self.name = name
 
     @rank_zero_only
     def log_local(self, save_dir, split, images, global_step, current_epoch, batch_idx):
-        root = os.path.join(save_dir, "image_log", split)
+        root = os.path.join(save_dir, "image_log", self.name, split)
+        
+        imgs = []
         for k in images:
-            grid = torchvision.utils.make_grid(images[k], nrow=4)
-            if self.rescale:
-                grid = (grid + 1.0) / 2.0  # -1,1 -> 0,1; c,h,w
-            grid = grid.transpose(0, 1).transpose(1, 2).squeeze(-1)
-            grid = grid.numpy()
-            grid = (grid * 255).astype(np.uint8)
-            filename = "{}_gs-{:06}_e-{:06}_b-{:06}.png".format(k, global_step, current_epoch, batch_idx)
-            path = os.path.join(root, filename)
-            os.makedirs(os.path.split(path)[0], exist_ok=True)
-            Image.fromarray(grid).save(path)
+            imgs += images[k]
+
+        grid = torchvision.utils.make_grid(imgs, nrow=self.max_images)
+        if self.rescale:
+            grid = (grid + 1.0) / 2.0  # -1,1 -> 0,1; c,h,w
+        grid = grid.transpose(0, 1).transpose(1, 2).squeeze(-1)
+        grid = grid.numpy()
+        grid = (grid * 255).astype(np.uint8)
+        filename = "gs-{:06}_e-{:06}_b-{:06}.png".format(global_step, current_epoch, batch_idx)
+        path = os.path.join(root, filename)
+        os.makedirs(os.path.split(path)[0], exist_ok=True)
+        Image.fromarray(grid).save(path)
 
     def log_img(self, pl_module, batch, batch_idx, split="train"):
         check_idx = batch_idx  # if self.log_on_batch_idx else pl_module.global_step
-        if (self.check_frequency(check_idx) and  # batch_idx % self.batch_freq == 0
+        if not (self.check_frequency(check_idx, split) and  # batch_idx % self.batch_freq == 0
                 hasattr(pl_module, "log_images") and
                 callable(pl_module.log_images) and
                 self.max_images > 0):
-            logger = type(pl_module.logger)
+            return
 
-            is_train = pl_module.training
-            if is_train:
-                pl_module.eval()
 
-            with torch.no_grad():
-                images = pl_module.log_images(batch, split=split, **self.log_images_kwargs)
+        logger = type(pl_module.logger)
 
-            for k in images:
-                N = min(images[k].shape[0], self.max_images)
-                images[k] = images[k][:N]
-                if isinstance(images[k], torch.Tensor):
-                    images[k] = images[k].detach().cpu()
-                    if self.clamp:
-                        images[k] = torch.clamp(images[k], -1., 1.)
+        is_train = pl_module.training
+        if is_train:
+            pl_module.eval()
 
-            self.log_local(pl_module.logger.save_dir, split, images,
-                           pl_module.global_step, pl_module.current_epoch, batch_idx)
+        with torch.no_grad():
+            images = pl_module.log_images(batch, split=split, **self.log_images_kwargs)
 
-            if is_train:
-                pl_module.train()
+        # images is a dict
+        # so k is key
+        for k in images:
+            print(k)
+            N = min(images[k].shape[0], self.max_images)
+            images[k] = images[k][:N]
 
-    def check_frequency(self, check_idx):
+            # additions Nick
+            _, channel, _, _ = images[k].shape
+            if(channel > 3):
+                images[k] = images[k][:, 0:3, :, :]
+            if(channel == 1):
+                images[k] = torch.cat([images[k],images[k],images[k]], axis=1)
+            # ======================
+
+            if isinstance(images[k], torch.Tensor):
+                images[k] = images[k].detach().cpu()
+                if self.clamp:
+                    images[k] = torch.clamp(images[k], -1., 1.)
+
+        # pl_module.logger.save_dir
+        # for somem reason this is None when using wandb logger
+        # print(pl_module.logger.save_dir)
+        self.log_local('./', split, images,
+                        pl_module.global_step, pl_module.current_epoch, batch_idx)
+
+        if is_train:
+            pl_module.train()
+
+    def check_frequency(self, check_idx, split='train'):
+
+        if split == 'validation':
+            return True
+
         return check_idx % self.batch_freq == 0
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
         if not self.disabled:
             self.log_img(pl_module, batch, batch_idx, split="train")
+
+    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
+        if not self.disabled:
+            self.log_img(pl_module, batch, batch_idx, split="validation")
