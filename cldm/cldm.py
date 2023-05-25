@@ -129,6 +129,7 @@ class ControlNet(nn.Module):
         self.dropout = dropout
         self.channel_mult = channel_mult
         self.conv_resample = conv_resample
+        self.num_classes = num_classes
         self.use_checkpoint = use_checkpoint
         self.dtype = th.float16 if use_fp16 else th.float32
         self.num_heads = num_heads
