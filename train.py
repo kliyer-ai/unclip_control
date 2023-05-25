@@ -3,7 +3,7 @@ from share import *
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 from torch.utils.data import DataLoader
-from custom_dataset_cross import MyDataset
+from dataset import MyDataset
 from cldm.logger import ImageLogger
 from cldm.model import create_model, load_state_dict
 

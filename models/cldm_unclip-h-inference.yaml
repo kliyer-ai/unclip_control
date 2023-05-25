@@ -1,6 +1,6 @@
 model:
   base_learning_rate: 1.0e-04
-  target: ldm.models.diffusion.ddpm.ImageEmbeddingConditionedLatentDiffusion
+  target: cldm.cldm.ControlLDM
   params:
     embedding_dropout: 0.25
     parameterization: "v"
@@ -10,13 +10,16 @@ model:
     timesteps: 1000
     first_stage_key: "jpg"
     cond_stage_key: "txt"
-    image_size: 96
+    control_key: "hint"
+    embedding_key: "style"
+    image_size: 64
     channels: 4
     cond_stage_trainable: false
     conditioning_key: crossattn-adm
     scale_factor: 0.18215
     monitor: val/loss_simple_ema
     use_ema: False
+    only_mid_control: False
 
     embedder_config:
       target: ldm.modules.encoders.modules.FrozenOpenCLIPImageEmbedder
@@ -29,8 +32,28 @@ model:
           timesteps: 1000
           beta_schedule: squaredcos_cap_v2
 
+    control_stage_config:
+      target: cldm.cldm.ControlNet
+      params:
+        num_classes: "sequential"
+        adm_in_channels: 2048
+        use_checkpoint: True
+        image_size: 32 # unused
+        in_channels: 4
+        hint_channels: 4
+        model_channels: 320
+        attention_resolutions: [ 4, 2, 1 ]
+        num_res_blocks: 2
+        channel_mult: [ 1, 2, 4, 4 ]
+        num_head_channels: 64 # need to fix for flash-attn
+        use_spatial_transformer: True
+        use_linear_in_transformer: True
+        transformer_depth: 1
+        context_dim: 1024
+        legacy: False
+
     unet_config:
-      target: ldm.modules.diffusionmodules.openaimodel.UNetModel
+      target: cldm.cldm.ControlledUnetModel
       params:
         num_classes: "sequential"
         adm_in_channels: 2048

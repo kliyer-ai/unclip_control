@@ -20,11 +20,17 @@ from ldm.models.diffusion.ddim import DDIMSampler
 
 
 class ControlledUnetModel(UNetModel):
-    def forward(self, x, timesteps=None, context=None, control=None, only_mid_control=False, **kwargs):
+    # def forward(self, x, hint, timesteps, context, y=None, **kwargs):
+    def forward(self, x, timesteps=None, context=None, control=None, y=None, only_mid_control=False, **kwargs):
         hs = []
         with torch.no_grad():
             t_emb = timestep_embedding(timesteps, self.model_channels, repeat_only=False)
             emb = self.time_embed(t_emb)
+            
+            if self.num_classes is not None:
+                assert y.shape[0] == x.shape[0]
+                emb = emb + self.label_emb(y)
+
             h = x.type(self.dtype)
             for module in self.input_blocks:
                 h = module(h, emb, context)
@@ -358,11 +364,11 @@ class ControlLDM(ImageEmbeddingConditionedLatentDiffusion):
         c_adm = cond['c_adm']
 
         if cond['c_concat'] is None:
-            eps = diffusion_model(x=x_noisy, timesteps=t, context=cond_txt, control=None, only_mid_control=self.only_mid_control)
+            eps = diffusion_model(x=x_noisy, timesteps=t, context=cond_txt, control=None, y=c_adm, only_mid_control=self.only_mid_control)
         else:
             control = self.control_model(x=x_noisy, hint=torch.cat(cond['c_concat'], 1), timesteps=t, context=cond_txt, y=c_adm)
             control = [c * scale for c, scale in zip(control, self.control_scales)]
-            eps = diffusion_model(x=x_noisy, timesteps=t, context=cond_txt, control=control, only_mid_control=self.only_mid_control)
+            eps = diffusion_model(x=x_noisy, timesteps=t, context=cond_txt, control=control, y=c_adm, only_mid_control=self.only_mid_control)
 
         return eps
 
