@@ -11,6 +11,7 @@ model:
     first_stage_key: "jpg"
     cond_stage_key: "txt"
     control_key: "hint"
+    embedding_key: "style"
     image_size: 96
     channels: 4
     cond_stage_trainable: false
@@ -34,7 +35,7 @@ model:
           timesteps: 1000
           beta_schedule: squaredcos_cap_v2
 
-    unet_config:
+    control_stage_config:
       target: cldm.cldm.ControlNet
       params:
         num_classes: "sequential"
