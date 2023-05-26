@@ -159,11 +159,9 @@ class DDPM(pl.LightningModule):
         self.loss_type = loss_type
 
         self.learn_logvar = learn_logvar
-        logvar = torch.full(fill_value=logvar_init, size=(self.num_timesteps,))
+        self.logvar = torch.full(fill_value=logvar_init, size=(self.num_timesteps,))
         if self.learn_logvar:
             self.logvar = nn.Parameter(self.logvar, requires_grad=True)
-        # else:
-        #     self.register_buffer("logvar", logvar)
 
         self.ucg_training = ucg_training or dict()
         if self.ucg_training:
@@ -1758,7 +1756,13 @@ class DiffusionWrapper(pl.LightningModule):
                 cc = torch.cat(c_crossattn, 1)
             else:
                 cc = c_crossattn
-            out = self.diffusion_model(x, t, context=cc)
+            if hasattr(self, "scripted_diffusion_model"):
+                # TorchScript changes names of the arguments
+                # with argument cc defined as context=cc scripted model will produce
+                # an error: RuntimeError: forward() is missing value for argument 'argument_3'.
+                out = self.scripted_diffusion_model(x, t, cc)
+            else:
+                out = self.diffusion_model(x, t, context=cc)
         elif self.conditioning_key == "hybrid":
             xc = torch.cat([x] + c_concat, dim=1)
             cc = torch.cat(c_crossattn, 1)
@@ -2421,7 +2425,7 @@ class ImageEmbeddingConditionedLatentDiffusion(LatentDiffusion):
             self.noise_augmentor = None
 
     def get_input(
-        self, batch, k, cond_key=None, bs=None, noise_embedding=True, **kwargs
+        self, batch, k, cond_key=None, bs=None, dropout_embedding=True, **kwargs
     ):
         outputs = LatentDiffusion.get_input(self, batch, k, bs=bs, **kwargs)
         z, c = outputs[0], outputs[1]
@@ -2432,7 +2436,7 @@ class ImageEmbeddingConditionedLatentDiffusion(LatentDiffusion):
             c_adm, noise_level_emb = self.noise_augmentor(c_adm)
             # assume this gives embeddings of noise levels
             c_adm = torch.cat((c_adm, noise_level_emb), 1)
-        if noise_embedding:
+        if dropout_embedding:
             c_adm = (
                 torch.bernoulli(
                     (1.0 - self.embedding_dropout)
