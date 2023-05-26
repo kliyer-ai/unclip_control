@@ -2399,10 +2399,10 @@ class ImageEmbeddingConditionedLatentDiffusion(LatentDiffusion):
         self._init_noise_aug(noise_aug_config)
 
     def _init_embedder(self, config, freeze=True):
-        print('init embedder')
+        print("init embedder")
         embedder = instantiate_from_config(config)
         if freeze:
-            print('freeze embedder')
+            print("freeze embedder")
             self.embedder = embedder.eval()
             self.embedder.train = disabled_train
             for param in self.embedder.parameters():
@@ -2410,7 +2410,7 @@ class ImageEmbeddingConditionedLatentDiffusion(LatentDiffusion):
 
     def _init_noise_aug(self, config):
         if config is not None:
-            print('init noise aug')
+            print("init noise aug")
             # use the KARLO schedule for noise augmentation on CLIP image embeddings
             noise_augmentor = instantiate_from_config(config)
             assert isinstance(noise_augmentor, nn.Module)
@@ -2420,7 +2420,9 @@ class ImageEmbeddingConditionedLatentDiffusion(LatentDiffusion):
         else:
             self.noise_augmentor = None
 
-    def get_input(self, batch, k, cond_key=None, bs=None, noise_embedding=True, **kwargs):
+    def get_input(
+        self, batch, k, cond_key=None, bs=None, noise_embedding=True, **kwargs
+    ):
         outputs = LatentDiffusion.get_input(self, batch, k, bs=bs, **kwargs)
         z, c = outputs[0], outputs[1]
         img = batch[self.embed_key][:bs]
