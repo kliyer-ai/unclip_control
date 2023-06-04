@@ -399,26 +399,61 @@ class ControlNet(nn.Module):
 
 class ControlLDM(ImageEmbeddingConditionedLatentDiffusion):
     def __init__(
-        self, control_stage_config, control_key, only_mid_control, *args, **kwargs
+        self,
+        control_stage_config,
+        control_key,
+        only_mid_control,
+        control_dropout=0,
+        txt_dropout=0,
+        *args,
+        **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.control_model = instantiate_from_config(control_stage_config)
         self.control_key = control_key
         self.only_mid_control = only_mid_control
         self.control_scales = [1.0] * 13
+        self.control_dropout = control_dropout
+        self.txt_dropout = txt_dropout
 
     @torch.no_grad()
-    def get_input(self, batch, k, bs=None, *args, **kwargs):
+    def get_input(
+        self, batch, k, bs=None, dropout_control=True, dropout_txt=True, *args, **kwargs
+    ):
         # x, c = super().get_input(batch, self.first_stage_key, *args, **kwargs)
         inputs = super().get_input(batch, self.first_stage_key, *args, **kwargs)
         x, c = inputs[0], inputs[1]
         control = batch[self.control_key]
         if bs is not None:
             control = control[:bs]
+
         control = control.to(self.device)
         control = einops.rearrange(control, "b h w c -> b c h w")
         control = control.to(memory_format=torch.contiguous_format).float()
+
+        if dropout_control:
+            control = (
+                torch.bernoulli(
+                    (1.0 - self.control_dropout)
+                    * torch.ones(control.shape[0], device=control.device)[
+                        :, None, None, None
+                    ]
+                )
+                * control
+            )
+
+        txt = c["c_crossattn"][0]
+        if dropout_txt:
+            keep_probs = torch.bernoulli(
+                (1.0 - self.txt_dropout)
+                * torch.ones(txt.shape[0], device=txt.device)[:, None, None]
+            )
+            txt = keep_probs * txt + (
+                1 - keep_probs
+            ) * self.get_unconditional_conditioning(txt.shape[0])
+
         c["c_concat"] = [control]
+        c["c_crossattn"] = [txt]
         outputs = [x, c]
         outputs.extend(inputs[2:])
         return outputs
@@ -485,8 +520,16 @@ class ControlLDM(ImageEmbeddingConditionedLatentDiffusion):
     ):
         use_ddim = ddim_steps is not None
 
-        z, c, x, xrec, xc = self.get_input(
-            batch, self.first_stage_key, bs=N, dropout_embedding=False
+        # z, c, x, xrec, xc = self.get_input(
+        #     batch, self.first_stage_key, bs=N, dropout_embedding=False
+        # )
+        z, c = self.get_input(
+            batch,
+            self.first_stage_key,
+            bs=N,
+            dropout_embedding=False,
+            dropout_control=False,
+            dropout_txt=False,
         )
         c_cat, c_crossattn, c_adm = (
             c["c_concat"][0][:N],
@@ -518,7 +561,6 @@ class ControlLDM(ImageEmbeddingConditionedLatentDiffusion):
         # x and xrec are basically the same image
         # just one went through the auto-encoder
         # log["inputs"] = x
-        log["reconstruction"] = xrec  # actual frame at t
         log["control"] = (
             c_cat * 2.0 - 1.0
         )  # structure of x or xrec, structure frame at t (e.g. HED)
@@ -527,6 +569,7 @@ class ControlLDM(ImageEmbeddingConditionedLatentDiffusion):
             (512, 512), batch[self.cond_stage_key], size=16
         )
         log[f"samples_cfg_scale_{unconditional_guidance_scale:.2f}"] = x_samples_cfg
+        log["reconstruction"] = self.decode_first_stage(z)  # xrec  # actual frame at t
 
         return log
 

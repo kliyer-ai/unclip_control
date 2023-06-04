@@ -3,8 +3,6 @@ model:
   target: cldm.cldm.ControlLDM
   params:
     embedding_dropout: 0.25
-    control_dropout: 0.25
-    txt_dropout: 0.0
     parameterization: "v"
     linear_start: 0.00085
     linear_end: 0.0120
@@ -22,6 +20,9 @@ model:
     monitor: val/loss_simple_ema
     use_ema: False
     only_mid_control: False
+    ucg_training:
+      txt:
+        p: 0.1
 
     embedder_config:
       target: ldm.modules.encoders.modules.FrozenOpenCLIPImageEmbedder
