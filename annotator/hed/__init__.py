@@ -18,10 +18,32 @@ class DoubleConvBlock(torch.nn.Module):
     def __init__(self, input_channel, output_channel, layer_number):
         super().__init__()
         self.convs = torch.nn.Sequential()
-        self.convs.append(torch.nn.Conv2d(in_channels=input_channel, out_channels=output_channel, kernel_size=(3, 3), stride=(1, 1), padding=1))
+        self.convs.append(
+            torch.nn.Conv2d(
+                in_channels=input_channel,
+                out_channels=output_channel,
+                kernel_size=(3, 3),
+                stride=(1, 1),
+                padding=1,
+            )
+        )
         for i in range(1, layer_number):
-            self.convs.append(torch.nn.Conv2d(in_channels=output_channel, out_channels=output_channel, kernel_size=(3, 3), stride=(1, 1), padding=1))
-        self.projection = torch.nn.Conv2d(in_channels=output_channel, out_channels=1, kernel_size=(1, 1), stride=(1, 1), padding=0)
+            self.convs.append(
+                torch.nn.Conv2d(
+                    in_channels=output_channel,
+                    out_channels=output_channel,
+                    kernel_size=(3, 3),
+                    stride=(1, 1),
+                    padding=1,
+                )
+            )
+        self.projection = torch.nn.Conv2d(
+            in_channels=output_channel,
+            out_channels=1,
+            kernel_size=(1, 1),
+            stride=(1, 1),
+            padding=0,
+        )
 
     def __call__(self, x, down_sampling=False):
         h = x
@@ -37,11 +59,21 @@ class ControlNetHED_Apache2(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.norm = torch.nn.Parameter(torch.zeros(size=(1, 3, 1, 1)))
-        self.block1 = DoubleConvBlock(input_channel=3, output_channel=64, layer_number=2)
-        self.block2 = DoubleConvBlock(input_channel=64, output_channel=128, layer_number=2)
-        self.block3 = DoubleConvBlock(input_channel=128, output_channel=256, layer_number=3)
-        self.block4 = DoubleConvBlock(input_channel=256, output_channel=512, layer_number=3)
-        self.block5 = DoubleConvBlock(input_channel=512, output_channel=512, layer_number=3)
+        self.block1 = DoubleConvBlock(
+            input_channel=3, output_channel=64, layer_number=2
+        )
+        self.block2 = DoubleConvBlock(
+            input_channel=64, output_channel=128, layer_number=2
+        )
+        self.block3 = DoubleConvBlock(
+            input_channel=128, output_channel=256, layer_number=3
+        )
+        self.block4 = DoubleConvBlock(
+            input_channel=256, output_channel=512, layer_number=3
+        )
+        self.block5 = DoubleConvBlock(
+            input_channel=512, output_channel=512, layer_number=3
+        )
 
     def __call__(self, x):
         h = x - self.norm
@@ -59,6 +91,7 @@ class HEDdetector:
         modelpath = os.path.join(annotator_ckpts_path, "ControlNetHED.pth")
         if not os.path.exists(modelpath):
             from basicsr.utils.download_util import load_file_from_url
+
             load_file_from_url(remote_model_path, model_dir=annotator_ckpts_path)
         self.netNetwork = ControlNetHED_Apache2().float().cuda().eval()
         self.netNetwork.load_state_dict(torch.load(modelpath))
@@ -68,13 +101,52 @@ class HEDdetector:
         H, W, C = input_image.shape
         with torch.no_grad():
             image_hed = torch.from_numpy(input_image.copy()).float().cuda()
-            image_hed = rearrange(image_hed, 'h w c -> 1 c h w')
+            image_hed = rearrange(image_hed, "h w c -> 1 c h w")
             edges = self.netNetwork(image_hed)
             edges = [e.detach().cpu().numpy().astype(np.float32)[0, 0] for e in edges]
-            edges = [cv2.resize(e, (W, H), interpolation=cv2.INTER_LINEAR) for e in edges]
+            edges = [
+                cv2.resize(e, (W, H), interpolation=cv2.INTER_LINEAR) for e in edges
+            ]
             edges = np.stack(edges, axis=2)
             edge = 1 / (1 + np.exp(-np.mean(edges, axis=2).astype(np.float64)))
             edge = (edge * 255.0).clip(0, 255).astype(np.uint8)
+            return edge
+
+
+class TorchHEDdetector:
+    def __init__(self):
+        remote_model_path = "https://huggingface.co/lllyasviel/Annotators/resolve/main/ControlNetHED.pth"
+        modelpath = os.path.join(annotator_ckpts_path, "ControlNetHED.pth")
+        if not os.path.exists(modelpath):
+            from basicsr.utils.download_util import load_file_from_url
+
+            load_file_from_url(remote_model_path, model_dir=annotator_ckpts_path)
+        self.netNetwork = ControlNetHED_Apache2().float().eval()
+        self.netNetwork.load_state_dict(torch.load(modelpath))
+
+    # expects img in [0, 255]
+    def __call__(self, image_hed):
+        with torch.no_grad():
+            is_batched = True
+
+            if image_hed.ndim == 3:
+                image_hed = rearrange(image_hed, "h w c -> 1 h w c")
+                is_batched = False
+            if image_hed.shape[3] == 3:
+                image_hed = rearrange(image_hed, "b h w c -> b c h w")
+            B, C, H, W = image_hed.shape
+            resize = T.Resize((W, H), T.InterpolationMode.BICUBIC)
+            edges = self.netNetwork(image_hed)
+            edges = [e[:, 0] for e in edges]
+            edges = [resize(e) for e in edges]
+            edges = torch.stack(edges, axis=3)
+            edge = 1 / (1 + torch.exp(-torch.mean(edges, axis=3)))  # -> [b, h, w]
+            edge = (edge * 255.0).clip(0, 255).type(torch.uint8)
+            edge = edge[:, :, :, None].repeat_interleave(3, 3)  # -> [b, h, w, c]
+
+            if not is_batched:
+                edge = edge[0]
+
             return edge
 
 
