@@ -12,6 +12,7 @@ import numpy as np
 
 from einops import rearrange
 from annotator.util import annotator_ckpts_path
+import torchvision.transforms as T
 
 
 class DoubleConvBlock(torch.nn.Module):
