@@ -1,6 +1,6 @@
 model:
   base_learning_rate: 1.0e-04
-  target: cldm.cldm.ControlLDM
+  target: cldm.cldm.UnclipControlLDM
   params:
     embedding_dropout: 0.25
     control_dropout: 0.25
