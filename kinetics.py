@@ -184,7 +184,6 @@ class Kinetics700InterpolateBase(Dataset, PRNGMixin):
         return self.__getitem__(idx)
 
     def __getitem__(self, idx):
-        print("__getitem__")
         oldidx = idx
         idx = self.indices[idx]  # remap indices
         if idx in self.invalid:
