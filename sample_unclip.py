@@ -10,23 +10,37 @@ from annotator.hed import TorchHEDdetector
 from pathlib import Path
 
 # p = "./train_log/kin_hed_dropout1/lightning_logs/version_1/checkpoints/epoch=6-step=595385.ckpt"
-p = "./models/final_cross.ckpt"
-ddim_steps = 50
-strength = 1
-eta = 0
-scale = 5
-batch_size = 4
-seq_length = 15
-target_index = seq_length - 1
-out_dir = "results/cross/time_diff_15"
+p = "./train_log/kin_hed_unclip3/lightning_logs/version_4/checkpoints/epoch=1-step=159230.ckpt"
+
+
+def make_conditionings_from_input(img, model, num=1):
+    with torch.no_grad():
+        adm_cond = model.embedder(img)
+        weight = 1
+        if model.noise_augmentor is not None:
+            noise_level = 0
+            c_adm, noise_level_emb = model.noise_augmentor(
+                adm_cond,
+                noise_level=einops.repeat(
+                    torch.tensor([noise_level]).to(model.device), "1 -> b", b=num
+                ),
+            )
+            adm_cond = torch.cat((c_adm, noise_level_emb), 1) * weight
+        adm_uc = torch.zeros_like(adm_cond)
+    return adm_cond, adm_uc, weight
 
 
 def main():
-    model = create_model("./models/cldm_v15_cross.yaml").cuda()
-
+    model = create_model("./models/cldm_unclip-h-inference.yaml").cuda()
     model.load_state_dict(load_state_dict(p, location="cuda"))
     ddim_sampler = DDIMSampler(model)
-    frozenClipImageEmbedder = model.style_encoder
+
+    ddim_steps = 50
+    strength = 1
+    eta = 0
+    scale = 5
+    batch_size = 4
+    seq_length = 4
 
     dataset = Kinetics700InterpolateBase(
         sequence_time=None,
@@ -51,6 +65,8 @@ def main():
 
     apply_hed = TorchHEDdetector()
 
+    out_dir = "results/unclip/time_diff_0"
+
     Path(out_dir + "/pred").mkdir(parents=True, exist_ok=True)
     Path(out_dir + "/true").mkdir(parents=True, exist_ok=True)
 
@@ -58,7 +74,6 @@ def main():
 
     for i in range(250):
         # styles, structures = get_sequence(dl)
-        print(i)
 
         styles_batch = []
         target_batch = []
@@ -74,45 +89,40 @@ def main():
                 print("seq too short; skipping...")
                 continue
 
-            styles = (styles + 1.0) * 127.5
-            styles = styles.clip(0, 255).type(torch.uint8)
-
             # take image at specifc index
             styles_batch.append(styles[[0]])
 
             # he set offset
-            target_batch.append(styles[[target_index]])
+            target_batch.append(styles[[0]])
 
         # first element of batch (full sequence)
-        styles = torch.cat(styles_batch, dim=0).cuda()
+        styles = torch.cat(styles_batch, dim=0)
+        styles = einops.rearrange(styles, "b h w c -> b c h w").cuda()
+
         target = torch.cat(target_batch, dim=0)
+        target = (target + 1.0) * 127.5
+        target = target.clip(0, 255).type(torch.uint8)
 
         structures = apply_hed(target.clone()) / 255.0
         control = einops.rearrange(structures.clone(), "b h w c -> b c h w").cuda()
 
         B, C, H, W = control.shape
 
-        style_embedding = frozenClipImageEmbedder(styles)
+        adm_cond, adm_uc, w = make_conditionings_from_input(styles, model, num=B)
 
-        c_style = style_embedding.last_hidden_state
-        c_embed = style_embedding.pooler_output
         c_prompt = model.get_learned_conditioning([""] * B)
 
-        uc_style = torch.zeros_like(c_style)
-        uc_embed = torch.zeros_like(c_embed)
         uc_prompt = model.get_learned_conditioning([""] * B)
 
         cond = {
             "c_concat": [control],
             "c_crossattn": [c_prompt],
-            "c_style": [c_style],
-            "c_embed": [c_embed],
+            "c_adm": adm_cond,
         }
         un_cond = {
             "c_concat": [control],
             "c_crossattn": [uc_prompt],
-            "c_style": [uc_style],
-            "c_embed": [uc_embed],
+            "c_adm": adm_uc,
         }
         shape = (4, H // 8, W // 8)
 

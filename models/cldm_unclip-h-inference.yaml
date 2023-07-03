@@ -3,7 +3,7 @@ model:
   target: cldm.cldm.UnclipControlLDM
   params:
     embedding_dropout: 0.25
-    control_dropout: 0.25
+    control_dropout: 0.0
     txt_dropout: 0.0
     parameterization: "v"
     linear_start: 0.00085
