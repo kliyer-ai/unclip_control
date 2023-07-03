@@ -10,7 +10,7 @@ from annotator.hed import TorchHEDdetector
 from pathlib import Path
 
 # p = "./train_log/kin_hed_dropout1/lightning_logs/version_1/checkpoints/epoch=6-step=595385.ckpt"
-p = "./model/final_cross.ckpt"
+p = "./models/final_cross.ckpt"
 
 
 model = create_model("./models/cldm_v15_cross.yaml").cuda()
@@ -24,7 +24,7 @@ strength = 1
 eta = 0
 scale = 5
 batch_size = 4
-seq_length = 60
+seq_length = 4
 
 
 dataset = Kinetics700InterpolateBase(
@@ -41,7 +41,7 @@ dataset = Kinetics700InterpolateBase(
     filter_file="../ControlNet/data_val.json",
     flow_only=False,
     include_full_sequence=True,
-    include_hed=True,
+    include_hed=False,
 )
 
 torch.manual_seed(42)
@@ -79,10 +79,10 @@ for i in range(250):
         styles = styles.clip(0, 255).type(torch.uint8)
 
         # take image at specifc index
-        styles_batch.append(styles[0])
+        styles_batch.append(styles[[0]])
 
         # he set offset
-        target_batch.append(styles[0])
+        target_batch.append(styles[[0]])
 
     # first element of batch (full sequence)
     styles = torch.cat(styles_batch, dim=0).cuda()
