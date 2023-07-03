@@ -10,7 +10,7 @@ from annotator.hed import TorchHEDdetector
 from pathlib import Path
 
 # p = "./train_log/kin_hed_dropout1/lightning_logs/version_1/checkpoints/epoch=6-step=595385.ckpt"
-p = "./modle/final_cross.ckpt"
+p = "./model/final_cross.ckpt"
 
 
 model = create_model("./models/cldm_v15_cross.yaml").cuda()

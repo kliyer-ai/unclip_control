@@ -25,7 +25,7 @@ scratch_dict = model.state_dict()
 
 target_dict = {}
 
-print(scratch_dict.keys())
+# print(scratch_dict.keys())
 
 # log var won't be in the scratch_dict
 # so it's not copied over from the pretrained weights (checkpoint)
