@@ -28,6 +28,13 @@ from ldm.util import log_txt_as_img, exists, instantiate_from_config
 from ldm.models.diffusion.ddim import DDIMSampler
 
 
+# copied from ddpm.py
+def disabled_train(self, mode=True):
+    """Overwrite model.train with this function to make sure train/eval mode
+    does not change anymore."""
+    return self
+
+
 class ControlledUnetModel(UNetModel):
     # def forward(self, x, hint, timesteps, context, y=None, **kwargs):
     def forward(
@@ -98,6 +105,7 @@ class ControlNet(nn.Module):
         context_dim=None,  # custom transformer support
         n_embed=None,  # custom support for prediction of discrete ids into codebook of first stage vq model
         legacy=True,
+        use_style_embed=False,
         disable_self_attentions=None,
         num_attention_blocks=None,
         disable_middle_self_attn=False,
@@ -199,6 +207,14 @@ class ControlNet(nn.Module):
                 )
             else:
                 raise ValueError()
+
+        self.use_style_embed = use_style_embed
+        if use_style_embed:
+            self.style_embed = nn.Sequential(
+                linear(context_dim, time_embed_dim),
+                nn.SiLU(),
+                linear(time_embed_dim, time_embed_dim),
+            )
 
         self.input_blocks = nn.ModuleList(
             [
@@ -369,7 +385,7 @@ class ControlNet(nn.Module):
             zero_module(conv_nd(self.dims, channels, channels, 1, padding=0))
         )
 
-    def forward(self, x, hint, timesteps, context, y=None, **kwargs):
+    def forward(self, x, hint, timesteps, context, style_embed=None, y=None, **kwargs):
         t_emb = timestep_embedding(timesteps, self.model_channels, repeat_only=False)
         emb = self.time_embed(t_emb)
 
@@ -377,18 +393,21 @@ class ControlNet(nn.Module):
             assert y.shape[0] == x.shape[0]
             emb = emb + self.label_emb(y)
 
+        if self.use_style_embed:
+            style_embed = self.style_embed(style_embed)
+            emb = emb + style_embed
+
         guided_hint = self.input_hint_block(hint, emb, context)
 
         outs = []
 
         h = x.type(self.dtype)
         for module, zero_conv in zip(self.input_blocks, self.zero_convs):
+            h = module(h, emb, context)
             if guided_hint is not None:
-                h = module(h, emb, context)
                 h += guided_hint
                 guided_hint = None
-            else:
-                h = module(h, emb, context)
+
             outs.append(zero_conv(h, emb, context))
 
         h = self.middle_block(h, emb, context)
