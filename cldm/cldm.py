@@ -1070,7 +1070,7 @@ class ConcatControlLDM(ControlLDM):
         return samples, intermediates
 
 
-class ControlLDM(ImageEmbeddingConditionedLatentDiffusion):
+class UnclipControlLDM(ImageEmbeddingConditionedLatentDiffusion):
     def __init__(
         self,
         control_stage_config,
